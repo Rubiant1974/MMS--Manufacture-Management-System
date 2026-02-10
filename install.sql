@@ -1,0 +1,160 @@
+CREATE DATABASE IF NOT EXISTS prosys_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE prosys_db;
+
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    full_name VARCHAR(120) NOT NULL,
+    username VARCHAR(60) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    signature_path VARCHAR(255) NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS items (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    item_code VARCHAR(80) NOT NULL UNIQUE,
+    item_name VARCHAR(150) NOT NULL,
+    uom VARCHAR(20) NOT NULL,
+    item_type ENUM('RAW','WIP','FINISHED') NOT NULL DEFAULT 'RAW',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS quotations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    quotation_no VARCHAR(80) NOT NULL UNIQUE,
+    customer_name VARCHAR(150) NOT NULL,
+    payment_term ENUM('COD','TOP') NOT NULL DEFAULT 'TOP',
+    status ENUM('DRAFT','SENT','WON','LOST') NOT NULL DEFAULT 'DRAFT',
+    total_amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS spk (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    spk_no VARCHAR(80) NOT NULL UNIQUE,
+    quotation_id BIGINT UNSIGNED NULL,
+    status ENUM('OPEN','IN_PROGRESS','LOCKED_NCR','CLOSED') NOT NULL DEFAULT 'OPEN',
+    created_by BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_spk_quotation FOREIGN KEY (quotation_id) REFERENCES quotations(id),
+    CONSTRAINT fk_spk_user FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS spk_parts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    spk_id BIGINT UNSIGNED NOT NULL,
+    item_id BIGINT UNSIGNED NOT NULL,
+    qty_plan DECIMAL(12,2) NOT NULL,
+    status ENUM('PLANNED','IN_PROCESS','DONE','HOLD') NOT NULL DEFAULT 'PLANNED',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_spk_parts_spk FOREIGN KEY (spk_id) REFERENCES spk(id),
+    CONSTRAINT fk_spk_parts_item FOREIGN KEY (item_id) REFERENCES items(id)
+);
+
+CREATE TABLE IF NOT EXISTS vendors (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    vendor_name VARCHAR(150) NOT NULL,
+    contact_person VARCHAR(120) NULL,
+    phone VARCHAR(40) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS spk_processes (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    spk_part_id BIGINT UNSIGNED NOT NULL,
+    process_name VARCHAR(80) NOT NULL,
+    process_order INT NOT NULL,
+    is_subcon TINYINT(1) NOT NULL DEFAULT 0,
+    vendor_id BIGINT UNSIGNED NULL,
+    target_time INT NULL COMMENT 'Target in minutes',
+    actual_start DATETIME NULL,
+    actual_finish DATETIME NULL,
+    status ENUM('PENDING','STARTED','HOLD','CLOSED') NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_spk_processes_part FOREIGN KEY (spk_part_id) REFERENCES spk_parts(id),
+    CONSTRAINT fk_spk_processes_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+);
+
+CREATE TABLE IF NOT EXISTS hold_reasons (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    reason_name VARCHAR(120) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS production_logs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    spk_process_id BIGINT UNSIGNED NOT NULL,
+    action_type ENUM('START','HOLD','CLOSE') NOT NULL,
+    hold_reason_id BIGINT UNSIGNED NULL,
+    operator_id BIGINT UNSIGNED NOT NULL,
+    notes TEXT NULL,
+    action_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_prod_logs_process FOREIGN KEY (spk_process_id) REFERENCES spk_processes(id),
+    CONSTRAINT fk_prod_logs_hold_reason FOREIGN KEY (hold_reason_id) REFERENCES hold_reasons(id),
+    CONSTRAINT fk_prod_logs_operator FOREIGN KEY (operator_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS qc_points (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    point_name VARCHAR(120) NOT NULL,
+    description TEXT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS ncr_reports (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    spk_id BIGINT UNSIGNED NOT NULL,
+    issue_desc TEXT NOT NULL,
+    root_cause TEXT NULL,
+    corrective_action TEXT NULL,
+    status ENUM('Open','Closed') NOT NULL DEFAULT 'Open',
+    created_by BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_ncr_spk FOREIGN KEY (spk_id) REFERENCES spk(id),
+    CONSTRAINT fk_ncr_user FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS qc_transactions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    spk_id BIGINT UNSIGNED NOT NULL,
+    qc_point_id BIGINT UNSIGNED NOT NULL,
+    status ENUM('OK','NG') NOT NULL,
+    ncr_id BIGINT UNSIGNED NULL,
+    checked_by BIGINT UNSIGNED NULL,
+    checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_qc_trans_spk FOREIGN KEY (spk_id) REFERENCES spk(id),
+    CONSTRAINT fk_qc_trans_point FOREIGN KEY (qc_point_id) REFERENCES qc_points(id),
+    CONSTRAINT fk_qc_trans_ncr FOREIGN KEY (ncr_id) REFERENCES ncr_reports(id),
+    CONSTRAINT fk_qc_trans_user FOREIGN KEY (checked_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS material_returns (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    spk_id BIGINT UNSIGNED NOT NULL,
+    item_id BIGINT UNSIGNED NOT NULL,
+    qty_return DECIMAL(12,2) NOT NULL,
+    warehouse_location VARCHAR(80) NULL,
+    returned_by BIGINT UNSIGNED NULL,
+    returned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT NULL,
+    CONSTRAINT fk_mat_returns_spk FOREIGN KEY (spk_id) REFERENCES spk(id),
+    CONSTRAINT fk_mat_returns_item FOREIGN KEY (item_id) REFERENCES items(id),
+    CONSTRAINT fk_mat_returns_user FOREIGN KEY (returned_by) REFERENCES users(id)
+);
+
+INSERT INTO hold_reasons (reason_name) VALUES
+('Breakdown Mesin'),
+('Menunggu Material'),
+('Menunggu Approval QC'),
+('Kendala Operator')
+ON DUPLICATE KEY UPDATE reason_name = VALUES(reason_name);
